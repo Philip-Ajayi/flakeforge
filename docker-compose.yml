@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  flakeforge:
+    build: .
+    container_name: flakeforge-agent
+    ports:
+      - "8000:8000"
+    environment:
+      - NEBIUS_API_KEY=${NEBIUS_API_KEY:-offline}
+      - NEBIUS_BASE_URL=${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1}
+      - NEBIUS_MODEL=${NEBIUS_MODEL:-nvidia/nemotron-3-super-120b-a12b}
+      - FLAKEFORGE_HOST=0.0.0.0
+      - FLAKEFORGE_PORT=8000
+    restart: unless-stopped

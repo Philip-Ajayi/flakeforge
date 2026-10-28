@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlakeForge | Deterministic Concurrency De-Flaker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <header>
+      <div class="logo-group">
+        <span class="logo-icon">⚡</span>
+        <div>
+          <h1>FlakeForge</h1>
+          <p class="subtitle">Deterministic Concurrency De-Flaker & Synchronization Repair Agent</p>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge badge-accent">NVIDIA Nemotron-3</span>
+        <span class="badge badge-nebius">Nebius Token Factory</span>
+        <span class="badge badge-green">Production Ready</span>
+      </div>
+    </header>
+
+    <main class="grid-layout">
+      <!-- Left Panel: Controls & Benchmarks -->
+      <section class="card panel-controls">
+        <h2>Target Concurrency Harness</h2>
+        <div class="form-group">
+          <label for="benchmarkSelect">Select Real Concurrency Benchmark:</label>
+          <select id="benchmarkSelect">
+            <option value="async_cache">Async Cache (Read-After-Write Hazard)</option>
+            <option value="rate_limiter">Token Bucket Rate Limiter (Lost Update)</option>
+            <option value="bank_account">Bank Account Transfer (Deadlock)</option>
+            <option value="task_leak">TaskGroup Leak (Orphaned Cancellation)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="maxSeedsInput">Permutation Search Bound:</label>
+          <input type="number" id="maxSeedsInput" value="50" min="5" max="200">
+        </div>
+
+        <div class="form-group">
+          <label for="stressSeedsInput">Phase-2 Stress Gate Seeds:</label>
+          <input type="number" id="stressSeedsInput" value="1000" min="100" max="5000">
+        </div>
+
+        <button id="runTriageBtn" class="btn btn-primary">
+          <span class="btn-text">Execute Autonomous Triage</span>
+        </button>
+
+        <div id="stepper" class="stepper hidden">
+          <div class="step" id="step1"><span class="step-num">1</span> AST Schedule Injection</div>
+          <div class="step" id="step2"><span class="step-num">2</span> Schedule Pinning</div>
+          <div class="step" id="step3"><span class="step-num">3</span> Delta-Debug Minimizer</div>
+          <div class="step" id="step4"><span class="step-num">4</span> Nebius Token Factory</div>
+          <div class="step" id="step5"><span class="step-num">5</span> 1,000-Seed Stress Gate</div>
+        </div>
+      </section>
+
+      <!-- Right Panel: Triage Results & Visualizations -->
+      <section class="card panel-results">
+        <h2>Autonomous Triage & Synthesis Dashboard</h2>
+
+        <div id="placeholderState" class="empty-state">
+          <div class="empty-icon">🔍</div>
+          <p>Select a benchmark and run triage to isolate failing schedules and synthesize race-free patches.</p>
+        </div>
+
+        <div id="resultsContent" class="hidden">
+          <!-- Seed Pinning Banner -->
+          <div class="alert-box alert-failure">
+            <div>
+              <strong>FAILING SCHEDULE ISOLATED:</strong> Seed <span id="resSeed" class="highlight-seed">#8492</span>
+            </div>
+            <div id="resError" class="error-text">AssertionError: Cache state out of sync!</div>
+          </div>
+
+          <!-- Trace Minimizer Table -->
+          <div class="result-section">
+            <h3>Delta-Debug Trace Minimization</h3>
+            <p class="section-desc">Trace reduced from <span id="rawTraceCount">28</span> steps to <span id="minTraceCount">2</span> minimal conflicting operations.</p>
+            <table class="trace-table" id="traceTable">
+              <thead>
+                <tr>
+                  <th>Step</th>
+                  <th>Coroutine</th>
+                  <th>Line</th>
+                  <th>Interleaved Hazard Role</th>
+                </tr>
+              </thead>
+              <tbody id="traceTableBody"></tbody>
+            </table>
+          </div>
+
+          <!-- Nebius Diagnosis -->
+          <div class="result-section">
+            <h3>Nebius Token Factory Reasoning</h3>
+            <div class="diagnosis-card">
+              <div class="pattern-tag" id="resPattern">READ_AFTER_WRITE_HAZARD</div>
+              <p id="resDiagnosis">Diagnosis text...</p>
+              <div class="proof-box" id="resExplanation">Proof text...</div>
+            </div>
+          </div>
+
+          <!-- Diff Viewer -->
+          <div class="result-section">
+            <h3>Synthesized AST Patch</h3>
+            <pre class="diff-block" id="diffBlock"></pre>
+          </div>
+
+          <!-- Stress Gate Results -->
+          <div class="result-section">
+            <h3>Verification Stress Gate (Phase 2)</h3>
+            <div class="stress-metric">
+              <div class="metric-number" id="stressPassed">1,000 / 1,000</div>
+              <div class="metric-label">Consecutive Seed Permutations Passed (0 Flakes)</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
