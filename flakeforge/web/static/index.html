@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FlakeForge | Deterministic Concurrency De-Flaker</title>
+  <title>FlakeForge | NVIDIA NIM Concurrency De-Flaker</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -17,9 +17,9 @@
         </div>
       </div>
       <div class="header-badges">
-        <span class="badge badge-accent">NVIDIA Nemotron-3</span>
-        <span class="badge badge-nebius">Nebius Token Factory</span>
-        <span class="badge badge-green">Production Ready</span>
+        <span class="badge badge-nim">NVIDIA NIM</span>
+        <span class="badge badge-accent">Nemotron Reasoning</span>
+        <span class="badge badge-green">Live Production</span>
       </div>
     </header>
 
@@ -53,10 +53,10 @@
 
         <div id="stepper" class="stepper hidden">
           <div class="step" id="step1"><span class="step-num">1</span> AST Schedule Injection</div>
-          <div class="step" id="step2"><span class="step-num">2</span> Schedule Pinning</div>
-          <div class="step" id="step3"><span class="step-num">3</span> Delta-Debug Minimizer</div>
-          <div class="step" id="step4"><span class="step-num">4</span> Nebius Token Factory</div>
-          <div class="step" id="step5"><span class="step-num">5</span> 1,000-Seed Stress Gate</div>
+          <div class="step" id="step2"><span class="step-num">2</span> Deterministic Schedule Pinning</div>
+          <div class="step" id="step3"><span class="step-num">3</span> Delta-Debug Minimizer (ddmin)</div>
+          <div class="step" id="step4"><span class="step-num">4</span> NVIDIA NIM Live Synthesis</div>
+          <div class="step" id="step5"><span class="step-num">5</span> 1,000-Seed Verification Gate</div>
         </div>
       </section>
 
@@ -64,24 +64,29 @@
       <section class="card panel-results">
         <h2>Autonomous Triage & Synthesis Dashboard</h2>
 
+        <div id="errorBanner" class="alert-box alert-failure hidden" style="margin-top: 10px;">
+          <strong>LIVE INFERENCE ERROR:</strong>
+          <div id="errorMessage" class="error-text"></div>
+        </div>
+
         <div id="placeholderState" class="empty-state">
           <div class="empty-icon">🔍</div>
-          <p>Select a benchmark and run triage to isolate failing schedules and synthesize race-free patches.</p>
+          <p>Select a benchmark and run triage to isolate failing schedules and synthesize race-free patches using live NVIDIA NIM.</p>
         </div>
 
         <div id="resultsContent" class="hidden">
           <!-- Seed Pinning Banner -->
           <div class="alert-box alert-failure">
             <div>
-              <strong>FAILING SCHEDULE ISOLATED:</strong> Seed <span id="resSeed" class="highlight-seed">#8492</span>
+              <strong>FAILING SCHEDULE ISOLATED:</strong> Seed <span id="resSeed" class="highlight-seed">#--</span>
             </div>
-            <div id="resError" class="error-text">AssertionError: Cache state out of sync!</div>
+            <div id="resError" class="error-text">AssertionError: ...</div>
           </div>
 
           <!-- Trace Minimizer Table -->
           <div class="result-section">
             <h3>Delta-Debug Trace Minimization</h3>
-            <p class="section-desc">Trace reduced from <span id="rawTraceCount">28</span> steps to <span id="minTraceCount">2</span> minimal conflicting operations.</p>
+            <p class="section-desc">Trace reduced from <span id="rawTraceCount">0</span> steps to <span id="minTraceCount">0</span> minimal conflicting operations.</p>
             <table class="trace-table" id="traceTable">
               <thead>
                 <tr>
@@ -95,11 +100,17 @@
             </table>
           </div>
 
-          <!-- Nebius Diagnosis -->
+          <!-- NVIDIA NIM Diagnosis -->
           <div class="result-section">
-            <h3>Nebius Token Factory Reasoning</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <h3>NVIDIA NIM Reasoning</h3>
+              <div>
+                <span class="badge badge-nim" id="modelBadge">nvidia/llama-3.1-nemotron-70b-instruct</span>
+                <span class="badge badge-accent" id="latencyBadge">Live</span>
+              </div>
+            </div>
             <div class="diagnosis-card">
-              <div class="pattern-tag" id="resPattern">READ_AFTER_WRITE_HAZARD</div>
+              <div class="pattern-tag" id="resPattern">CONCURRENCY_HAZARD</div>
               <p id="resDiagnosis">Diagnosis text...</p>
               <div class="proof-box" id="resExplanation">Proof text...</div>
             </div>
@@ -116,7 +127,7 @@
             <h3>Verification Stress Gate (Phase 2)</h3>
             <div class="stress-metric">
               <div class="metric-number" id="stressPassed">1,000 / 1,000</div>
-              <div class="metric-label">Consecutive Seed Permutations Passed (0 Flakes)</div>
+              <div class="metric-label">Consecutive Seed Permutations Passed Against Synthesized Patch</div>
             </div>
           </div>
         </div>

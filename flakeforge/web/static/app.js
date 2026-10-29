@@ -6,8 +6,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const stepper = document.getElementById("stepper");
   const placeholderState = document.getElementById("placeholderState");
   const resultsContent = document.getElementById("resultsContent");
+  const errorBanner = document.getElementById("errorBanner");
+  const errorMessage = document.getElementById("errorMessage");
 
-  const stepElements = [
+  const steps = [
     document.getElementById("step1"),
     document.getElementById("step2"),
     document.getElementById("step3"),
@@ -15,18 +17,30 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("step5"),
   ];
 
+  function setStepState(activeIdx) {
+    steps.forEach((el, idx) => {
+      if (idx < activeIdx) {
+        el.className = "step done";
+      } else if (idx === activeIdx) {
+        el.className = "step active";
+      } else {
+        el.className = "step";
+      }
+    });
+  }
+
   runBtn.addEventListener("click", async () => {
     runBtn.disabled = true;
     stepper.classList.remove("hidden");
     placeholderState.classList.add("hidden");
     resultsContent.classList.add("hidden");
+    if (errorBanner) errorBanner.classList.add("hidden");
 
-    // Animate visual steps
-    for (let i = 0; i < stepElements.length; i++) {
-      stepElements[i].className = "step active";
-      await new Promise((r) => setTimeout(r, 250));
-      stepElements[i].className = "step done";
-    }
+    // Live Step Progression
+    setStepState(0);
+    const stepTimer1 = setTimeout(() => setStepState(1), 350);
+    const stepTimer2 = setTimeout(() => setStepState(2), 1200);
+    const stepTimer3 = setTimeout(() => setStepState(3), 2000);
 
     try {
       const response = await fetch("/api/triage", {
@@ -39,10 +53,33 @@ document.addEventListener("DOMContentLoaded", () => {
         }),
       });
 
+      clearTimeout(stepTimer1);
+      clearTimeout(stepTimer2);
+      clearTimeout(stepTimer3);
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server returned HTTP ${response.status}`);
+      }
+
+      setStepState(4);
       const data = await response.json();
+      setTimeout(() => {
+        steps.forEach((el) => (el.className = "step done"));
+      }, 300);
+
       renderResults(data);
     } catch (err) {
-      alert("Error executing triage: " + err.message);
+      clearTimeout(stepTimer1);
+      clearTimeout(stepTimer2);
+      clearTimeout(stepTimer3);
+      steps.forEach((el) => (el.className = "step"));
+      if (errorBanner && errorMessage) {
+        errorMessage.innerText = err.message;
+        errorBanner.classList.remove("hidden");
+      } else {
+        alert("Live Triage Error: " + err.message);
+      }
     } finally {
       runBtn.disabled = false;
     }
@@ -57,6 +94,13 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("rawTraceCount").innerText = data.raw_trace_count;
     document.getElementById("minTraceCount").innerText = data.minimized_trace.length;
 
+    if (document.getElementById("modelBadge")) {
+      document.getElementById("modelBadge").innerText = data.model || "NVIDIA NIM";
+    }
+    if (document.getElementById("latencyBadge")) {
+      document.getElementById("latencyBadge").innerText = `${data.inference_latency_seconds}s latency`;
+    }
+
     const tbody = document.getElementById("traceTableBody");
     tbody.innerHTML = "";
     data.minimized_trace.forEach((step, idx) => {
@@ -65,13 +109,13 @@ document.addEventListener("DOMContentLoaded", () => {
       tr.innerHTML = `
         <td>${step.step_id}</td>
         <td><code>${step.coro_name || "worker"}</code></td>
-        <td>${step.line_no || 18}</td>
-        <td><span style="color: ${idx % 2 === 0 ? '#ef4444' : '#f59e0b'}">${role}</span></td>
+        <td>${step.line_no || 0}</td>
+        <td><span style="color: ${idx % 2 === 0 ? "#ef4444" : "#f59e0b"}">${role}</span></td>
       `;
       tbody.appendChild(tr);
     });
 
-    document.getElementById("resPattern").innerText = data.repair.root_cause_pattern || "READ_AFTER_WRITE_HAZARD";
+    document.getElementById("resPattern").innerText = data.repair.root_cause_pattern || "CONCURRENCY_HAZARD";
     document.getElementById("resDiagnosis").innerText = data.repair.diagnosis;
     document.getElementById("resExplanation").innerText = data.repair.explanation;
 

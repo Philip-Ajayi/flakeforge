@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -10,7 +11,8 @@ from flakeforge.scheduler.deterministic import run_coroutine_with_seed
 from flakeforge.minimizer.delta_debug import DeltaDebugMinimizer
 from flakeforge.verifier.seed_replay import SeedReplayer
 from flakeforge.verifier.stress_gate import StressGateVerifier
-from flakeforge.llm.nebius_client import NebiusTokenFactoryClient
+from flakeforge.llm.nim_client import NvidiaNimClient
+from flakeforge.config import settings
 
 # Benchmark source modules
 from flakeforge.benchmarks import (
@@ -35,11 +37,18 @@ class TriageRequest(BaseModel):
     max_seeds: int = 40
     stress_seeds: int = 1000
 
-def build_instrumented_workload(module, workload_name: str):
-    """Dynamically instruments the benchmark source code with libcst
+def clean_python_code(code: str) -> str:
+    code = code.strip()
+    if code.startswith("```"):
+        lines = code.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        code = "\n".join(lines).strip()
+    return code
 
-    and compiles it into a runnable isolated execution namespace.
-    """
+def build_instrumented_workload(module, workload_name: str):
     raw_source = inspect.getsource(module)
     instrumented_source = instrument_code(raw_source)
 
@@ -50,18 +59,35 @@ def build_instrumented_workload(module, workload_name: str):
     return raw_source, isolated_globals[workload_name]
 
 def build_repaired_workload(module, workload_name: str, target_class: str, repaired_code: str):
-    """Compiles the LLM's synthesized repair and patches it into the test workload."""
+    """Compiles the live LLM repair into a fresh namespace and links it to the workload."""
     raw_source = inspect.getsource(module)
+    repaired_code = clean_python_code(repaired_code)
 
-    # Isolated execution environment for the repaired code
-    repaired_globals = {}
+    repaired_globals = {
+        "__name__": f"{module.__name__}_repaired",
+        "asyncio": asyncio,
+        "time": time
+    }
     compiled_repair = compile(repaired_code, "<repaired_code>", "exec")
     exec(compiled_repair, repaired_globals)
 
-    # Determine class name emitted by LLM (handles AsyncCache, BuggyAsyncCache, etc.)
+    # If the LLM re-emitted the entire file including the workload, use it directly
+    if workload_name in repaired_globals and callable(repaired_globals[workload_name]):
+        return repaired_globals[workload_name]
+
+    # Resolve the newly patched class
     new_class = None
-    for name in [target_class, target_class.replace("Buggy", ""), "AsyncRateLimiter"]:
-        if name in repaired_globals:
+    candidates = [
+        target_class,
+        target_class.replace("Buggy", ""),
+        f"Buggy{target_class}",
+        "AsyncCache", "BuggyAsyncCache",
+        "BuggyRateLimiter", "AsyncRateLimiter", "RateLimiter",
+        "BuggyBankAccount", "BankAccount",
+        "TaskLeakService", "BuggyTaskLeakService"
+    ]
+    for name in candidates:
+        if name in repaired_globals and inspect.isclass(repaired_globals[name]):
             new_class = repaired_globals[name]
             break
 
@@ -71,13 +97,19 @@ def build_repaired_workload(module, workload_name: str, target_class: str, repai
                 new_class = val
                 break
 
-    # Compile the test workload harness, replacing the buggy class with the repaired class
-    workload_globals = {}
+    # Build the workload harness and inject the repaired class
+    workload_globals = {
+        "__name__": f"{module.__name__}_test",
+        "asyncio": asyncio,
+        "time": time
+    }
     compiled_workload = compile(raw_source, f"<{module.__name__}_test>", "exec")
     exec(compiled_workload, workload_globals)
 
     if new_class:
         workload_globals[target_class] = new_class
+        base_name = target_class.replace("Buggy", "")
+        workload_globals[base_name] = new_class
 
     return workload_globals[workload_name]
 
@@ -115,10 +147,10 @@ async def execute_triage(req: TriageRequest):
     bench_info = BENCHMARK_MODULES.get(req.benchmark_id, BENCHMARK_MODULES["async_cache"])
     module, workload_func_name, target_class_name = bench_info
 
-    # 1. Real LibCST AST Instrumentation & Namespace Compilation
+    # 1. AST Schedule Injection
     original_source, instrumented_workload = build_instrumented_workload(module, workload_func_name)
 
-    # 2. Monte Carlo Schedule Exploration
+    # 2. Schedule Pinning
     failing_seed = None
     failing_result = None
     for seed in range(1, req.max_seeds + 1):
@@ -134,7 +166,7 @@ async def execute_triage(req: TriageRequest):
             "message": f"Zero flakes discovered across {req.max_seeds} permutations."
         }
 
-    # 3. Real Delta Debugging Trace Minimization (ddmin)
+    # 3. Delta-Debug Trace Minimization
     minimizer = DeltaDebugMinimizer(coro_factory=instrumented_workload, seed=failing_seed)
     minimal_trace = await minimizer.minimize(failing_result.trace)
     if not minimal_trace:
@@ -143,23 +175,42 @@ async def execute_triage(req: TriageRequest):
     # 4. Deterministic Replay Verification
     reproduced = await SeedReplayer.verify_failing_seed(instrumented_workload, failing_seed, reps=3)
 
-    # 5. NVIDIA Nemotron on Nebius Token Factory Reasoning
-    client = NebiusTokenFactoryClient()
+    # 5. Live NVIDIA NIM Synthesis
+    client = NvidiaNimClient()
     trace_summary = f"{len(minimal_trace)} yield events: " + ", ".join([f"{t.coro_name}:{t.line_no}" for t in minimal_trace])
-    repair = await client.synthesize_repair(original_source, failing_seed, failing_result.error or "", trace_summary)
 
-    diff = ASTPatcher.generate_diff(original_source, repair.get("fixed_code", original_source), filename=f"{req.benchmark_id}.py")
+    t_start = time.perf_counter()
+    try:
+        repair = await client.synthesize_repair(
+            original_code=original_source,
+            seed=failing_seed,
+            error=failing_result.error or "",
+            trace_summary=trace_summary
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"NVIDIA NIM Live Inference Failed: {str(exc)}"
+        )
+    inference_duration = round(time.perf_counter() - t_start, 3)
 
-    # 6. Real Phase-2 Stress Gate Execution against the Synthesized Patch
+    diff = ASTPatcher.generate_diff(
+        original_source,
+        repair.get("fixed_code", original_source),
+        filename=f"{req.benchmark_id}.py"
+    )
+
+    # 6. Real Phase-2 Stress Gate with Synthesized Live Patch
     repaired_code = repair.get("fixed_code", original_source)
     try:
         repaired_workload = build_repaired_workload(module, workload_func_name, target_class_name, repaired_code)
         target_stress_coro = repaired_workload
-    except Exception:
-        # Fallback if the synthesized code contains syntax flaws
-        target_stress_coro = instrumented_workload
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Live synthesized patch failed compilation: {str(exc)}"
+        )
 
-    # Execute stress gate against the real repaired coroutine
     stress_res = await StressGateVerifier.run_stress_gate(
         coro_factory=target_stress_coro,
         seed_count=req.stress_seeds,
@@ -168,6 +219,10 @@ async def execute_triage(req: TriageRequest):
 
     return {
         "status": "triaged",
+        "live_mode": True,
+        "provider": "NVIDIA NIM",
+        "model": client.model,
+        "inference_latency_seconds": inference_duration,
         "failing_seed": failing_seed,
         "error": failing_result.error,
         "raw_trace_count": len(failing_result.trace),

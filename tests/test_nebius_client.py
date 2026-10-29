@@ -1,9 +1,9 @@
 import pytest
-from flakeforge.llm.nebius_client import NebiusTokenFactoryClient
+from flakeforge.llm.nim_client import NvidiaNimClient
 
 @pytest.mark.asyncio
 async def test_offline_synthesizer_generates_valid_patch():
-    client = NebiusTokenFactoryClient(api_key="offline")
+    client = NvidiaNimClient(api_key="offline")
     result = await client.synthesize_repair(
         original_code="class AsyncCache: pass",
         seed=8492,
@@ -14,4 +14,17 @@ async def test_offline_synthesizer_generates_valid_patch():
     assert "diagnosis" in result
     assert "fixed_code" in result
     assert "root_cause_pattern" in result
-    assert "READ_AFTER_WRITE_HAZARD" in result["root_cause_pattern"]
+    assert result["_meta"]["live"] is False
+
+def test_nim_json_extractor_handles_markdown_fences():
+    fenced_content = """```json
+    {
+      "diagnosis": "Unprotected dictionary read-write across await sleep",
+      "root_cause_pattern": "READ_AFTER_WRITE_HAZARD",
+      "fixed_code": "import asyncio\\nclass AsyncCache:\\n    pass",
+      "explanation": "Lock serializes access"
+    }
+    ```"""
+    parsed = NvidiaNimClient._extract_json(fenced_content)
+    assert parsed["root_cause_pattern"] == "READ_AFTER_WRITE_HAZARD"
+    assert "AsyncCache" in parsed["fixed_code"]

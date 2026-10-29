@@ -316,3 +316,9 @@ h3 {
 .hidden {
   display: none !important;
 }
+
+.badge-nim {
+  background: rgba(118, 185, 0, 0.15);
+  color: #76b900;
+  border: 1px solid #76b900;
+}

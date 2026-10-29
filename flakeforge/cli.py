@@ -10,7 +10,7 @@ from rich.table import Table
 from flakeforge.ast_engine.patcher import ASTPatcher
 from flakeforge.scheduler.deterministic import run_coroutine_with_seed
 from flakeforge.minimizer.delta_debug import DeltaDebugMinimizer
-from flakeforge.llm.nebius_client import NebiusTokenFactoryClient
+from flakeforge.llm.nim_client import NvidiaNimClient
 from flakeforge.verifier.seed_replay import SeedReplayer
 from flakeforge.verifier.stress_gate import StressGateVerifier
 from flakeforge.web.api import BENCHMARK_MODULES, build_instrumented_workload, build_repaired_workload
@@ -27,22 +27,25 @@ def main():
 @click.option("--max-seeds", default=50, help="Maximum seeds to explore.")
 @click.option("--stress-seeds", default=1000, help="Verification stress gate seed count.")
 def triage(target: str, max_seeds: int, stress_seeds: int):
-    """Pin the failing schedule, minimize trace, call Nebius Token Factory, and verify."""
+    """Pin the failing schedule, minimize trace, call NVIDIA NIM, and verify."""
     asyncio.run(_async_triage(target, max_seeds, stress_seeds))
 
 async def _async_triage(target: str, max_seeds: int, stress_seeds: int):
-    console.print(Panel.fit("[bold cyan]FlakeForge: Concurrency De-Flaker & Repair Engine[/bold cyan]\n"
-                            "[dim]Powered by NVIDIA Nemotron on Nebius Token Factory[/dim]"))
+    client = NvidiaNimClient()
+    console.print(Panel.fit(
+        "[bold cyan]FlakeForge: Concurrency De-Flaker & Repair Engine[/bold cyan]\n"
+        f"[dim]Powered by NVIDIA Nemotron on NVIDIA NIM ({client.model})[/dim]"
+    ))
 
     bench_info = BENCHMARK_MODULES.get(target, BENCHMARK_MODULES["async_cache"])
     module, workload_name, class_name = bench_info
 
-    # 1. Live LibCST AST Instrumentation
+    # 1. AST Schedule Injection
     with console.status("[bold yellow]Instrumenting module AST with LibCST cooperative yield hooks...[/bold yellow]"):
         original_source, instrumented_workload = build_instrumented_workload(module, workload_name)
         console.print("[green]✔ LibCST transformation complete. Dynamic yield boundaries active.[/green]")
 
-    # 2. Monte Carlo Schedule Pinning
+    # 2. Schedule Pinning
     failing_seed = None
     failing_result = None
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
@@ -61,7 +64,7 @@ async def _async_triage(target: str, max_seeds: int, stress_seeds: int):
 
     console.print(f"\n[bold red]FAILING SCHEDULE ISOLATED:[/bold red] Seed [bold yellow]#{failing_seed}[/bold yellow]")
     console.print(f"[red]Error Trace:[/red] {failing_result.error}")
-    console.print(f"[dim]Captured full trace with {len(failing_result.trace)} cooperative yield steps.[/dim]\n")
+    console.print(f"[dim]Captured trace with {len(failing_result.trace)} cooperative yield steps.[/dim]\n")
 
     # 3. Delta-Debug Trace Minimization
     with console.status("[bold cyan]Running Delta Debugging trace minimizer (ddmin)...[/bold cyan]"):
@@ -87,9 +90,8 @@ async def _async_triage(target: str, max_seeds: int, stress_seeds: int):
         if is_reproducible:
             console.print("[bold green]✔ Deterministic Replay Confirmed:[/bold green] 3/3 runs failed identically.\n")
 
-    # 5. Nebius Token Factory Reasoning
-    with console.status("[bold cyan]Streaming trace to NVIDIA Nemotron on Nebius Token Factory...[/bold cyan]"):
-        client = NebiusTokenFactoryClient()
+    # 5. Live NVIDIA NIM Reasoning
+    with console.status(f"[bold cyan]Invoking live NVIDIA NIM endpoint ({client.model})...[/bold cyan]"):
         summary = f"{len(minimal_trace)} yield events: " + ", ".join([f"{t.coro_name}:{t.line_no}" for t in minimal_trace])
         repair = await client.synthesize_repair(original_source, failing_seed, failing_result.error, summary)
 
@@ -97,23 +99,19 @@ async def _async_triage(target: str, max_seeds: int, stress_seeds: int):
         f"[bold green]Root Cause Pattern:[/bold green] {repair.get('root_cause_pattern')}\n\n"
         f"[bold]Diagnosis:[/bold] {repair.get('diagnosis')}\n\n"
         f"[bold]Synchronization Proof:[/bold] {repair.get('explanation')}",
-        title="[bold yellow]NVIDIA Nemotron Reasoning Result[/bold yellow]",
-        border_style="cyan"
+        title=f"[bold green]NVIDIA NIM ({client.model}) Live Reasoning Result[/bold green]",
+        border_style="green"
     ))
 
     # Diff presentation
     diff = ASTPatcher.generate_diff(original_source, repair.get("fixed_code", original_source), filename=f"{target}.py")
     if diff:
-        console.print("\n[bold]Synthesized Synchronization Patch:[/bold]")
+        console.print("\n[bold]Synthesized Live Synchronization Patch:[/bold]")
         console.print(Syntax(diff, "diff", theme="monokai", line_numbers=True))
 
-    # 6. Real Phase-2 Stress Gate Execution
-    console.print(f"\n[bold cyan]Phase 2: Compiling Patch & Executing Stress Gate ({stress_seeds} Randomized Seeds)...[/bold cyan]")
-    try:
-        repaired_workload = build_repaired_workload(module, workload_name, class_name, repair.get("fixed_code", original_source))
-        target_stress = repaired_workload
-    except Exception:
-        target_stress = instrumented_workload
+    # 6. Real Phase-2 Stress Gate
+    console.print(f"\n[bold cyan]Phase 2: Compiling Live Patch & Executing Stress Gate ({stress_seeds} Seeds)...[/bold cyan]")
+    repaired_workload = build_repaired_workload(module, workload_name, class_name, repair.get("fixed_code", original_source))
 
     with Progress(BarColumn(), TextColumn("[progress.percentage]{task.percentage:>3.0f}%"), TextColumn("{task.completed}/{task.total} seeds"), console=console) as progress:
         gate_task = progress.add_task("Stress Gate", total=stress_seeds)
@@ -122,14 +120,13 @@ async def _async_triage(target: str, max_seeds: int, stress_seeds: int):
             progress.update(gate_task, completed=done)
 
         stress_res = await StressGateVerifier.run_stress_gate(
-            coro_factory=target_stress,
+            coro_factory=repaired_workload,
             seed_count=stress_seeds,
             progress_callback=update_progress
         )
         progress.update(gate_task, completed=stress_seeds)
 
-    console.print(f"[bold green]Verification Gate: PASSED.[/bold green] {stress_res['passed']}/{stress_res['total_tested']} seeds passed in {stress_res['duration_seconds']}s.")
-    console.print("[bold yellow]Deterministic regression fixture emitted:[/bold yellow] [green]tests/test_regression_seed" + str(failing_seed) + ".py[/green]\n")
+    console.print(f"[bold green]Verification Gate: PASSED.[/bold green] {stress_res['passed']}/{stress_res['total_tested']} seeds passed in {stress_res['duration_seconds']}s.\n")
 
 @main.command()
 @click.option("--host", default="0.0.0.0", help="Web dashboard host")
