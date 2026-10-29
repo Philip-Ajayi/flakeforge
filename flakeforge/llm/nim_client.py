@@ -1,20 +1,23 @@
 import json
 import re
 import httpx
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from flakeforge.config import settings
 from flakeforge.llm.prompts import SYSTEM_PROMPT, build_user_prompt
 
-# Recommended models hosted on integrate.api.nvidia.com
-SUPPORTED_MODELS = [
-    "meta/llama-3.3-70b-instruct",
+# Active flagship models hosted on integrate.api.nvidia.com
+ACTIVE_FALLBACK_MODELS = [
     "nvidia/nemotron-3-ultra-550b-a55b",
+    "z-ai/glm-5.3",
+    "deepseek-ai/deepseek-v4.1-flash",
     "meta/llama-3.1-8b-instruct",
-    "mistralai/mistral-large-2407"
 ]
 
 class NvidiaNimClient:
-    """Client for NVIDIA NIM (build.nvidia.com) with resilient auto-model recovery."""
+    """Client for NVIDIA NIM with dynamic /v1/models catalog discovery
+
+    and automatic failover when models reach End-of-Life (HTTP 410) or 404.
+    """
 
     def __init__(
         self,
@@ -25,6 +28,38 @@ class NvidiaNimClient:
         self.api_key = api_key or settings.nvidia_api_key
         self.base_url = (base_url or settings.nvidia_base_url).rstrip("/")
         self.model = model or settings.nvidia_model
+
+    async def _discover_live_model(self) -> Optional[str]:
+        """Queries /v1/models directly from NVIDIA to discover active models for this account."""
+        url = f"{self.base_url}/models"
+        headers = {
+            "Authorization": f"Bearer {self.api_key.strip()}",
+            "Accept": "application/json"
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    all_ids = [m["id"] for m in data.get("data", []) if "id" in m]
+
+                    # Filter out non-chat models (embeddings, audio, vision-only, etc.)
+                    chat_models = [
+                        m for m in all_ids
+                        if not any(x in m.lower() for x in ["embed", "rerank", "clip", "whisper", "tts", "sdxl", "flux"])
+                    ]
+
+                    # Prioritize top Nemotron / reasoning models
+                    for keyword in ["nemotron-3-ultra", "nemotron", "glm", "deepseek", "instruct"]:
+                        for m in chat_models:
+                            if keyword in m.lower():
+                                return m
+
+                    if chat_models:
+                        return chat_models[0]
+        except Exception:
+            pass
+        return None
 
     async def synthesize_repair(
         self,
@@ -42,21 +77,31 @@ class NvidiaNimClient:
                 "(from https://build.nvidia.com) in your environment variables."
             )
 
-        # Try primary model first, fallback if retired with 404
-        models_to_try = [self.model] + [m for m in SUPPORTED_MODELS if m != self.model]
+        # Build candidate queue starting with the requested model
+        models_to_try = [self.model]
+        for fallback in ACTIVE_FALLBACK_MODELS:
+            if fallback not in models_to_try:
+                models_to_try.append(fallback)
 
         last_error = None
-        for candidate_model in models_to_try:
+        for i, candidate_model in enumerate(models_to_try):
             try:
                 result = await self._call_nim(candidate_model, original_code, seed, error, trace_summary)
                 self.model = candidate_model
                 return result
             except RuntimeError as exc:
                 last_error = exc
-                if "404" in str(exc) and "Function" in str(exc):
-                    # Retired model detected, try next available model in catalog
+                err_str = str(exc)
+
+                # Check if model is retired (410) or not provisioned (404)
+                if "410" in err_str or "404" in err_str:
+                    # Dynamically inspect what is live in the account catalog
+                    live_model = await self._discover_live_model()
+                    if live_model and live_model not in models_to_try:
+                        models_to_try.insert(i + 1, live_model)
                     continue
-                raise exc
+                else:
+                    raise exc
 
         raise last_error
 
@@ -128,7 +173,7 @@ class NvidiaNimClient:
         if code_str.startswith("```"):
             lines = code_str.splitlines()
             if lines[0].startswith("```"):
-                lines = lines[1:]
+                lines = lines[:-1]
             if lines and lines[-1].startswith("```"):
                 lines = lines[:-1]
             code_str = "\n".join(lines).strip()

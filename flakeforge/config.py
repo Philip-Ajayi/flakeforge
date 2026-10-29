@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     nvidia_model: str = (
         os.getenv("NVIDIA_MODEL")
         or os.getenv("NIM_MODEL")
-        or "meta/llama-3.3-70b-instruct"
+        or "nvidia/nemotron-3-ultra-550b-a55b"
     )
     provider: str = os.getenv("FLAKEFORGE_PROVIDER", "nvidia_nim")
     host: str = os.getenv("FLAKEFORGE_HOST", "0.0.0.0")
