@@ -30,8 +30,8 @@
         <div class="form-group">
           <label for="benchmarkSelect">Select Real Concurrency Benchmark:</label>
           <select id="benchmarkSelect">
+            <option value="rate_limiter">Token Bucket Rate Limiter (Lost Update & Double-Spend)</option>
             <option value="async_cache">Async Cache (Read-After-Write Hazard)</option>
-            <option value="rate_limiter">Token Bucket Rate Limiter (Lost Update)</option>
             <option value="bank_account">Bank Account Transfer (Deadlock)</option>
             <option value="task_leak">TaskGroup Leak (Orphaned Cancellation)</option>
           </select>
@@ -53,7 +53,7 @@
 
         <div id="stepper" class="stepper hidden">
           <div class="step" id="step1"><span class="step-num">1</span> AST Schedule Injection</div>
-          <div class="step" id="step2"><span class="step-num">2</span> Deterministic Schedule Pinning</div>
+          <div class="step" id="step2"><span class="step-num">2</span> Schedule Pinning</div>
           <div class="step" id="step3"><span class="step-num">3</span> Delta-Debug Minimizer (ddmin)</div>
           <div class="step" id="step4"><span class="step-num">4</span> NVIDIA NIM Live Synthesis</div>
           <div class="step" id="step5"><span class="step-num">5</span> 1,000-Seed Verification Gate</div>
@@ -76,15 +76,10 @@
 
         <div id="resultsContent" class="hidden">
           <!-- Seed Pinning Banner -->
-          <div class="alert-box alert-failure">
-            <div>
-              <strong>FAILING SCHEDULE ISOLATED:</strong> Seed <span id="resSeed" class="highlight-seed">#--</span>
-            </div>
-            <div id="resError" class="error-text">AssertionError: ...</div>
-          </div>
+          <div class="alert-box alert-failure" id="failureBanner"></div>
 
           <!-- Trace Minimizer Table -->
-          <div class="result-section">
+          <div class="result-section" id="traceSection">
             <h3>Delta-Debug Trace Minimization</h3>
             <p class="section-desc">Trace reduced from <span id="rawTraceCount">0</span> steps to <span id="minTraceCount">0</span> minimal conflicting operations.</p>
             <table class="trace-table" id="traceTable">
@@ -101,11 +96,11 @@
           </div>
 
           <!-- NVIDIA NIM Diagnosis -->
-          <div class="result-section">
+          <div class="result-section" id="reasoningSection">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
               <h3>NVIDIA NIM Reasoning</h3>
               <div>
-                <span class="badge badge-nim" id="modelBadge">nvidia/llama-3.1-nemotron-70b-instruct</span>
+                <span class="badge badge-nim" id="modelBadge">meta/llama-3.3-70b-instruct</span>
                 <span class="badge badge-accent" id="latencyBadge">Live</span>
               </div>
             </div>
@@ -117,13 +112,13 @@
           </div>
 
           <!-- Diff Viewer -->
-          <div class="result-section">
+          <div class="result-section" id="diffSection">
             <h3>Synthesized AST Patch</h3>
             <pre class="diff-block" id="diffBlock"></pre>
           </div>
 
           <!-- Stress Gate Results -->
-          <div class="result-section">
+          <div class="result-section" id="stressSection">
             <h3>Verification Stress Gate (Phase 2)</h3>
             <div class="stress-metric">
               <div class="metric-number" id="stressPassed">1,000 / 1,000</div>

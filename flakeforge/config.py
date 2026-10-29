@@ -2,7 +2,6 @@ import os
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    # Primary NVIDIA NIM settings
     nvidia_api_key: str = (
         os.getenv("NVIDIA_API_KEY")
         or os.getenv("NIM_API_KEY")
@@ -16,7 +15,7 @@ class Settings(BaseSettings):
     nvidia_model: str = (
         os.getenv("NVIDIA_MODEL")
         or os.getenv("NIM_MODEL")
-        or "nvidia/llama-3.1-nemotron-70b-instruct"
+        or "meta/llama-3.3-70b-instruct"
     )
     provider: str = os.getenv("FLAKEFORGE_PROVIDER", "nvidia_nim")
     host: str = os.getenv("FLAKEFORGE_HOST", "0.0.0.0")
@@ -26,7 +25,6 @@ class Settings(BaseSettings):
     stress_seed_count: int = 1000
     timeout_seconds: float = 4.0
 
-    # Backward compatibility aliases
     @property
     def nebius_api_key(self) -> str:
         return self.nvidia_api_key

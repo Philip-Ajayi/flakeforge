@@ -36,7 +36,6 @@ document.addEventListener("DOMContentLoaded", () => {
     resultsContent.classList.add("hidden");
     if (errorBanner) errorBanner.classList.add("hidden");
 
-    // Live Step Progression
     setStepState(0);
     const stepTimer1 = setTimeout(() => setStepState(1), 350);
     const stepTimer2 = setTimeout(() => setStepState(2), 1200);
@@ -88,11 +87,40 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderResults(data) {
     resultsContent.classList.remove("hidden");
 
-    document.getElementById("resSeed").innerText = `#${data.failing_seed}`;
-    document.getElementById("resError").innerText = data.error;
+    const failureBanner = document.getElementById("failureBanner");
+    const traceSection = document.getElementById("traceSection");
+    const reasoningSection = document.getElementById("reasoningSection");
+    const diffSection = document.getElementById("diffSection");
+    const stressSection = document.getElementById("stressSection");
+
+    // Case 1: Clean run (No race condition observed)
+    if (data.status === "clean") {
+      failureBanner.className = "alert-box alert-clean";
+      failureBanner.innerHTML = `
+        <div style="color: var(--accent-green); font-weight: 700; font-size: 14px;">✔ CLEAN CONCURRENCY HARNESS</div>
+        <div style="font-size: 12px; margin-top: 4px; color: var(--text-main);">${data.message}</div>
+      `;
+      if (traceSection) traceSection.classList.add("hidden");
+      if (reasoningSection) reasoningSection.classList.add("hidden");
+      if (diffSection) diffSection.classList.add("hidden");
+      if (stressSection) stressSection.classList.add("hidden");
+      return;
+    }
+
+    // Case 2: Race condition triaged
+    failureBanner.className = "alert-box alert-failure";
+    failureBanner.innerHTML = `
+      <div><strong>FAILING SCHEDULE ISOLATED:</strong> Seed <span class="highlight-seed">#${data.failing_seed}</span></div>
+      <div class="error-text">${data.error}</div>
+    `;
+
+    if (traceSection) traceSection.classList.remove("hidden");
+    if (reasoningSection) reasoningSection.classList.remove("hidden");
+    if (diffSection) diffSection.classList.remove("hidden");
+    if (stressSection) stressSection.classList.remove("hidden");
 
     document.getElementById("rawTraceCount").innerText = data.raw_trace_count;
-    document.getElementById("minTraceCount").innerText = data.minimized_trace.length;
+    document.getElementById("minTraceCount").innerText = (data.minimized_trace || []).length;
 
     if (document.getElementById("modelBadge")) {
       document.getElementById("modelBadge").innerText = data.model || "NVIDIA NIM";
@@ -103,7 +131,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const tbody = document.getElementById("traceTableBody");
     tbody.innerHTML = "";
-    data.minimized_trace.forEach((step, idx) => {
+    (data.minimized_trace || []).forEach((step, idx) => {
       const tr = document.createElement("tr");
       const role = idx % 2 === 0 ? "Read / Invalidation Hazard" : "Write / Mutation Hazard";
       tr.innerHTML = `

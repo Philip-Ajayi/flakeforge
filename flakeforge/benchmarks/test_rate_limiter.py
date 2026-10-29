@@ -5,7 +5,7 @@ import pytest
 class BuggyRateLimiter:
     """Sliding-window token rate limiter with concurrency leak."""
 
-    def __init__(self, capacity: int = 5, refill_rate: float = 10.0):
+    def __init__(self, capacity: int = 3, refill_rate: float = 10.0):
         self.capacity = capacity
         self.tokens = capacity
         self.last_refill = time.monotonic()
@@ -16,9 +16,10 @@ class BuggyRateLimiter:
         self.tokens = min(self.capacity, self.tokens + elapsed * 10.0)
         self.last_refill = now
 
-        await asyncio.sleep(0.001)  # Context switch point
-
+        # Classical check-then-act double-spend hazard:
+        # Multiple concurrent requests see tokens >= amount BEFORE any task decrements!
         if self.tokens >= amount:
+            await asyncio.sleep(0.001)  # Context switch window between check and deduction
             self.tokens -= amount
             return True
         return False
@@ -32,7 +33,7 @@ async def run_limiter_workload():
         if await limiter.acquire(1):
             successful_grants += 1
 
-    # 10 burst requests when capacity is only 3
+    # 10 burst requests when capacity is strictly 3
     tasks = [asyncio.create_task(requester()) for _ in range(10)]
     await asyncio.gather(*tasks)
 
